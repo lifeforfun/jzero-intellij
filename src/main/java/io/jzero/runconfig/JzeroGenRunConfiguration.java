@@ -86,6 +86,10 @@ public class JzeroGenRunConfiguration extends RunConfigurationBase<RunProfileSta
             commandLine.setWorkDirectory(workingDirectory);
         }
 
+        // Set GOTOOLCHAIN=auto to allow automatic toolchain selection
+        // This ensures Go can download the required version when hooks are executed
+        commandLine.getEnvironment().put("GOTOOLCHAIN", "auto");
+
         return commandLine;
     }
 
