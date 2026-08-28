@@ -5,8 +5,11 @@ SYNTAX:     'syntax';
 INFO:       'info';
 MAP:        'map';
 STRUCT:     'struct';
+ANY:        'interface{}';
 INTERFACE:  'interface';
 TYPE:       'type';
+VO:         'vo';
+DTO:        'dto';
 ATSERVER:   '@server';
 ATDOC:      '@doc';
 ATHANDLER:  '@handler';
@@ -14,7 +17,6 @@ SERVICE:    'service';
 RETURNS:    'returns';
 IMPORT:     'import';
 AS:         'as';
-
 
 // HTTP METHOD
 HTTPMETHOD:GET|HEAD|POST|PUT|PATCH|DELETE|CONNECT|OPTIONS|TRACE;
@@ -77,15 +79,10 @@ HOSTVALUE:        DIGIT+ '.' DIGIT+ '.' DIGIT+ '.' DIGIT+;
 // IDTIFIER
 IDENT:       (ALPHA|UNDERSCORE)(ALPHA|DIGIT|UNDERSCORE|'-')*;
 
-
-
 // WHITE SPACE
 WS:         [ \t\r\n]+ -> channel(HIDDEN) ;
 
-
-
 VALUE:      STRING_F     ~('\r'|'\n')*  STRING_F;
-
 RAW_STRING: RAW_STRING_F ~('`')* RAW_STRING_F;
 
 // COMMENT
@@ -93,18 +90,11 @@ COMMENT:    COMMENT_FLAG ~('\n')*  -> channel(HIDDEN);
 DOC_COMMENT:            '/*' .*? '*/' -> channel(HIDDEN);
 
 fragment COMMENT_FLAG:   '//';
-
 fragment RAW_STRING_F: '`';
-
 fragment STRING_F: '"';
-
 fragment DIGIT: [0-9];
-
 fragment UNDERSCORE: '_';
-
 fragment ALPHA: [a-zA-Z];
-
-//ERRCHAR:        . -> channel(HIDDEN);
 
 fragment HEX_DIGIT
     : [0-9a-fA-F]

@@ -130,7 +130,7 @@ public class ApiRootNode extends IPsiNode implements ScopeNode {
 
     public static Set<PsiElement> getPsiElementsByDir(PsiDirectory directory, Set<String> expectedPath) {
         Set<PsiElement> importedPsiElements = new ArrayListSet<>();
-        if (null == directory) {
+        if (null == directory || expectedPath == null || expectedPath.isEmpty()) {
             return importedPsiElements;
         }
         Project project = directory.getProject();

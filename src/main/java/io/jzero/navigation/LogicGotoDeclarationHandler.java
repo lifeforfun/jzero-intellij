@@ -1,44 +1,45 @@
 package io.jzero.navigation;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonObject;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.intellij.codeInsight.daemon.LineMarkerInfo;
 import com.intellij.codeInsight.daemon.LineMarkerProvider;
 import com.intellij.openapi.editor.markup.GutterIconRenderer;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
-import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.psi.search.FilenameIndex;
+import com.intellij.psi.search.GlobalSearchScope;
 import io.jzero.icon.ApiIcon;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 /**
- * LineMarker provider for logic file navigation to api/proto files
- * Navigates from internal/logic files back to their api/proto definitions
- * Uses metadata.json to find the corresponding api/proto file and line number
+ * Logic → api/proto gutter navigation.
+ * Prefer ~/.jzero/desc-metadata; fall back to @handler name matching for plain go-zero projects.
  */
 public class LogicGotoDeclarationHandler implements LineMarkerProvider {
 
     @Nullable
     @Override
     public LineMarkerInfo<?> getLineMarkerInfo(@NotNull PsiElement element) {
-        // Check if this is a Go file
         PsiFile containingFile = element.getContainingFile();
         if (containingFile == null || !containingFile.getName().endsWith(".go")) {
             return null;
         }
 
-        // Check if the file is in internal/logic directory
         VirtualFile virtualFile = containingFile.getVirtualFile();
         if (virtualFile == null) {
             return null;
@@ -49,173 +50,216 @@ public class LogicGotoDeclarationHandler implements LineMarkerProvider {
             return null;
         }
 
-        // Check if this element is a function declaration starting with "New"
-        if (!isNewFunctionDeclaration(element)) {
+        if (!isNewFunctionNameLeaf(element)) {
             return null;
         }
 
-        // Check if metadata.json exists and has matching entry for this logic file
-        if (!hasMetadataForLogicFile(filePath)) {
-            return null;
-        }
-
-        // Found a "func NewXxx" pattern with valid metadata, show navigation icon
-        return createNavigationMarker(element);
-    }
-
-    private LineMarkerInfo<?> createNavigationMarker(@NotNull PsiElement element) {
+        String funcName = element.getText();
         return new LineMarkerInfo<>(
                 element,
                 element.getTextRange(),
                 ApiIcon.FILE,
-                e -> "Navigate to API/Proto definition",
-                (e, elt) -> navigateToDescFile(elt),
+                e -> "Navigate to API: " + funcName,
+                (e, elt) -> navigateToDescFile(elt, funcName),
                 GutterIconRenderer.Alignment.LEFT,
                 () -> "Go to API/Proto"
         );
     }
 
-    private void navigateToDescFile(@NotNull PsiElement sourceElement) {
+    private void navigateToDescFile(@NotNull PsiElement sourceElement, @NotNull String funcName) {
         PsiFile containingFile = sourceElement.getContainingFile();
-        if (containingFile == null) {
+        if (containingFile == null || containingFile.getVirtualFile() == null) {
             return;
         }
+        String filePath = containingFile.getVirtualFile().getPath();
 
-        VirtualFile sourceFile = containingFile.getVirtualFile();
-        if (sourceFile == null) {
-            return;
-        }
-
-        String filePath = sourceFile.getPath();
-
-        // Find all metadata entries for this logic file
         List<LogicMetadata> metadataList = findAllMetadataForLogicFile(filePath);
-
-        if (metadataList.isEmpty()) {
-            return;
+        if (!metadataList.isEmpty()) {
+            LogicMetadata metadata = metadataList.get(0);
+            VirtualFile descFile = LocalFileSystem.getInstance().findFileByPath(metadata.descPath);
+            if (descFile != null && descFile.exists()) {
+                openFileAndNavigate(sourceElement.getProject(), descFile, metadata.descLine);
+                return;
+            }
         }
 
-        // If multiple entries found, we could show a popup to choose
-        // For now, just navigate to the first one
-        LogicMetadata metadata = metadataList.get(0);
-
-        VirtualFile descFile = resolveDescFile(sourceElement, metadata.descPath);
-        if (descFile != null) {
-            Project project = sourceElement.getProject();
-            openFileAndNavigate(project, descFile, metadata.descLine);
+        ApiHit hit = findApiByHandlerConvention(sourceElement.getProject(), filePath, funcName);
+        if (hit != null) {
+            openFileAndNavigate(sourceElement.getProject(), hit.file, hit.line);
         }
+    }
+
+    /**
+     * go-zero convention: New{Name}Logic → @handler {Name}Handler / {Name}
+     * Prefer service-route .api files over type-only .api files.
+     */
+    @Nullable
+    private ApiHit findApiByHandlerConvention(@NotNull Project project,
+                                              @NotNull String logicFilePath,
+                                              @NotNull String funcName) {
+        String handlerBase = stripNewLogic(funcName);
+        if (handlerBase.isEmpty()) {
+            return null;
+        }
+
+        String[] needles = {
+                "@handler " + handlerBase + "Handler",
+                "@handler " + handlerBase,
+                "handler: " + handlerBase + "Handler",
+                "handler: " + handlerBase
+        };
+
+        String projectRoot = extractBasePath(logicFilePath);
+        Collection<VirtualFile> apiFiles = FilenameIndex.getAllFilesByExt(
+                project, "api", GlobalSearchScope.projectScope(project));
+
+        ApiHit routeHit = null;
+        ApiHit anyHit = null;
+        for (VirtualFile apiFile : apiFiles) {
+            if (projectRoot != null && !apiFile.getPath().replace('\\', '/').startsWith(projectRoot.replace('\\', '/'))) {
+                continue;
+            }
+            String text;
+            try {
+                text = new String(apiFile.contentsToByteArray(), StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                continue;
+            }
+            int idx = indexOfHandler(text, needles);
+            if (idx < 0) {
+                continue;
+            }
+            int line = lineNumberAt(text, idx);
+            ApiHit hit = new ApiHit(apiFile, line);
+            if (isServiceRouteApi(text)) {
+                if (routeHit == null) {
+                    routeHit = hit;
+                }
+            } else if (anyHit == null) {
+                anyHit = hit;
+            }
+        }
+        return routeHit != null ? routeHit : anyHit;
+    }
+
+    private static int indexOfHandler(@NotNull String text, @NotNull String[] needles) {
+        for (String needle : needles) {
+            int from = 0;
+            while (from < text.length()) {
+                int idx = text.indexOf(needle, from);
+                if (idx < 0) {
+                    break;
+                }
+                int end = idx + needle.length();
+                // avoid prefix match: @handler Foo matching @handler FooBar
+                if (end >= text.length() || !isIdentChar(text.charAt(end))) {
+                    return idx;
+                }
+                from = end;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean isIdentChar(char c) {
+        return Character.isLetterOrDigit(c) || c == '_';
+    }
+
+    private static int lineNumberAt(@NotNull String text, int idx) {
+        int line = 1;
+        for (int i = 0; i < idx; i++) {
+            if (text.charAt(i) == '\n') {
+                line++;
+            }
+        }
+        return line;
+    }
+
+    /** go-zero .api that declares HTTP services (not type-only import files). */
+    private static boolean isServiceRouteApi(@NotNull String text) {
+        return text.contains("service ") && text.contains("@handler");
+    }
+
+    /** New{Name}Logic / New{Name} → {Name} */
+    @NotNull
+    private static String stripNewLogic(@NotNull String funcName) {
+        String name = funcName;
+        if (name.startsWith("New")) {
+            name = name.substring(3);
+        }
+        if (name.endsWith("Logic")) {
+            name = name.substring(0, name.length() - "Logic".length());
+        }
+        return name;
     }
 
     @NotNull
     private List<LogicMetadata> findAllMetadataForLogicFile(@NotNull String logicFilePath) {
         List<LogicMetadata> results = new ArrayList<>();
-
         try {
             String basePath = extractBasePath(logicFilePath);
             if (basePath == null) {
                 return results;
             }
-
-            String homeDir = System.getProperty("user.home");
-            String metadataPath = homeDir + "/.jzero/desc-metadata" + basePath + "/metadata.json";
-
+            String metadataPath = System.getProperty("user.home")
+                    + "/.jzero/desc-metadata" + basePath + "/metadata.json";
             File metadataFile = new File(metadataPath);
             if (!metadataFile.exists()) {
                 return results;
             }
-
-            String content = new String(Files.readAllBytes(Paths.get(metadataPath)));
+            String content = new String(Files.readAllBytes(Paths.get(metadataPath)), StandardCharsets.UTF_8);
             return parseAllMetadataForFile(content, logicFilePath);
-
         } catch (IOException e) {
-            e.printStackTrace();
+            return results;
         }
-
-        return results;
     }
 
     @NotNull
     private List<LogicMetadata> parseAllMetadataForFile(@NotNull String jsonContent, @NotNull String logicFilePath) {
         List<LogicMetadata> results = new ArrayList<>();
-
         try {
-            Gson gson = new Gson();
-            JsonObject root = gson.fromJson(jsonContent, JsonObject.class);
-
+            JsonObject root = new Gson().fromJson(jsonContent, JsonObject.class);
             if (root == null) {
                 return results;
             }
-
             String normalizedTargetPath = logicFilePath.replace("\\", "/");
-
-            // First try "api.routes" if desc file exists
-            if (root.has("api")) {
-                JsonObject api = root.getAsJsonObject("api");
-                if (api.has("routes")) {
-                    JsonArray entries = api.getAsJsonArray("routes");
-
-                    for (int i = 0; i < entries.size(); i++) {
-                        JsonObject entry = entries.get(i).getAsJsonObject();
-
-                        if (!entry.has("logic")) {
-                            continue;
-                        }
-
-                        // Logic field is absolute path
-                        String entryLogicPath = entry.get("logic").getAsString();
-                        String normalizedEntryPath = entryLogicPath.replace("\\", "/");
-
-                        if (normalizedEntryPath.equals(normalizedTargetPath)) {
-                            if (entry.has("desc")) {
-                                String descPath = entry.get("desc").getAsString();
-                                int descLine = entry.has("desc-line") ? entry.get("desc-line").getAsInt() : 0;
-
-                                LogicMetadata metadata = new LogicMetadata();
-                                metadata.descPath = descPath;
-                                metadata.descLine = descLine;
-                                results.add(metadata);
-                            }
-                        }
-                    }
-                }
+            collectMetadataEntries(root, "api", "routes", normalizedTargetPath, results);
+            if (results.isEmpty()) {
+                collectMetadataEntries(root, "proto", "rpcs", normalizedTargetPath, results);
             }
-
-            // If no results from api.routes or api doesn't exist, try proto.rpcs
-            if (root.has("proto")) {
-                JsonObject proto = root.getAsJsonObject("proto");
-                if (proto.has("rpcs")) {
-                    JsonArray entries = proto.getAsJsonArray("rpcs");
-
-                    for (int i = 0; i < entries.size(); i++) {
-                        JsonObject entry = entries.get(i).getAsJsonObject();
-
-                        if (!entry.has("logic")) {
-                            continue;
-                        }
-
-                        // Logic field is absolute path
-                        String entryLogicPath = entry.get("logic").getAsString();
-                        String normalizedEntryPath = entryLogicPath.replace("\\", "/");
-
-                        if (normalizedEntryPath.equals(normalizedTargetPath)) {
-                            if (entry.has("desc")) {
-                                String descPath = entry.get("desc").getAsString();
-                                int descLine = entry.has("desc-line") ? entry.get("desc-line").getAsInt() : 0;
-
-                                LogicMetadata metadata = new LogicMetadata();
-                                metadata.descPath = descPath;
-                                metadata.descLine = descLine;
-                                results.add(metadata);
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (Exception ignored) {
+            // ignore malformed metadata
         }
-
         return results;
+    }
+
+    private void collectMetadataEntries(@NotNull JsonObject root,
+                                        @NotNull String section,
+                                        @NotNull String arrayKey,
+                                        @NotNull String normalizedTargetPath,
+                                        @NotNull List<LogicMetadata> results) {
+        if (!root.has(section)) {
+            return;
+        }
+        JsonObject obj = root.getAsJsonObject(section);
+        if (!obj.has(arrayKey)) {
+            return;
+        }
+        JsonArray entries = obj.getAsJsonArray(arrayKey);
+        for (int i = 0; i < entries.size(); i++) {
+            JsonObject entry = entries.get(i).getAsJsonObject();
+            if (!entry.has("logic") || !entry.has("desc")) {
+                continue;
+            }
+            String entryLogicPath = entry.get("logic").getAsString().replace("\\", "/");
+            if (!entryLogicPath.equals(normalizedTargetPath)) {
+                continue;
+            }
+            LogicMetadata metadata = new LogicMetadata();
+            metadata.descPath = entry.get("desc").getAsString();
+            metadata.descLine = entry.has("desc-line") ? entry.get("desc-line").getAsInt() : 0;
+            results.add(metadata);
+        }
     }
 
     @Nullable
@@ -227,96 +271,58 @@ public class LogicGotoDeclarationHandler implements LineMarkerProvider {
                 return null;
             }
         }
-
         return logicFilePath.substring(0, logicIndex);
     }
 
-    @Nullable
-    private VirtualFile resolveDescFile(@NotNull PsiElement sourceElement,
-                                       @NotNull String descPath) {
-        // Desc path is always absolute in metadata.json
-        VirtualFile file = LocalFileSystem.getInstance().findFileByPath(descPath);
-        if (file != null && file.exists()) {
-            return file;
-        }
-
-        return null;
-    }
-
     private void openFileAndNavigate(@NotNull Project project, @NotNull VirtualFile file, int lineNumber) {
-        com.intellij.openapi.fileEditor.OpenFileDescriptor descriptor =
-            new com.intellij.openapi.fileEditor.OpenFileDescriptor(
+        new com.intellij.openapi.fileEditor.OpenFileDescriptor(
                 project,
                 file,
-                lineNumber > 0 ? lineNumber - 1 : 0, // Line numbers are 0-indexed
+                Math.max(lineNumber - 1, 0),
                 0
-            );
-        descriptor.navigate(true);
+        ).navigate(true);
     }
 
-    @Override
-    public void collectSlowLineMarkers(@NotNull java.util.List<? extends PsiElement> elements,
-                                       @NotNull java.util.Collection<? super LineMarkerInfo<?>> result) {
-        // Not needed for this implementation
-    }
-
-    /**
-     * Check if metadata.json exists and contains entry for this logic file
-     */
     private boolean hasMetadataForLogicFile(@NotNull String logicFilePath) {
-        try {
-            String basePath = extractBasePath(logicFilePath);
-            if (basePath == null) {
-                return false;
-            }
-
-            String homeDir = System.getProperty("user.home");
-            String metadataPath = homeDir + "/.jzero/desc-metadata" + basePath + "/metadata.json";
-
-            File metadataFile = new File(metadataPath);
-            if (!metadataFile.exists()) {
-                return false;
-            }
-
-            // Parse and check if there's a matching entry
-            String content = new String(Files.readAllBytes(Paths.get(metadataPath)));
-            List<LogicMetadata> metadataList = parseAllMetadataForFile(content, logicFilePath);
-
-            return !metadataList.isEmpty();
-
-        } catch (IOException e) {
-            return false;
-        }
+        return !findAllMetadataForLogicFile(logicFilePath).isEmpty();
     }
 
     /**
-     * Check if the given element is a function declaration starting with "New"
-     * Matches patterns like: func NewCreateUser(...) or func NewGetUser(...)
+     * Leaf identifier of {@code func NewXxx(...)} — required by LineMarkerInfo.
      */
-    private boolean isNewFunctionDeclaration(@NotNull PsiElement element) {
+    private boolean isNewFunctionNameLeaf(@NotNull PsiElement element) {
+        if (element.getChildren().length > 0) {
+            return false;
+        }
         String elementText = element.getText();
-
-        // Check if current element text looks like a function name
-        if (elementText == null || !elementText.matches("[a-zA-Z][a-zA-Z0-9_]*")) {
+        if (elementText == null || !elementText.matches("New[A-Za-z0-9_]+")) {
             return false;
         }
-
-        // Check if this function name starts with "New"
-        if (!elementText.startsWith("New")) {
-            return false;
-        }
-
-        // Check if the previous sibling is "func" keyword
         PsiElement prev = element.getPrevSibling();
         while (prev != null && (prev.getText() == null || prev.getText().trim().isEmpty())) {
             prev = prev.getPrevSibling();
         }
-
         return prev != null && "func".equals(prev.getText().trim());
+    }
+
+    @Override
+    public void collectSlowLineMarkers(@NotNull List<? extends PsiElement> elements,
+                                       @NotNull java.util.Collection<? super LineMarkerInfo<?>> result) {
+        // unused
     }
 
     private static class LogicMetadata {
         String descPath;
         int descLine;
+    }
+
+    private static class ApiHit {
+        final VirtualFile file;
+        final int line;
+
+        ApiHit(VirtualFile file, int line) {
+            this.file = file;
+            this.line = line;
+        }
     }
 }

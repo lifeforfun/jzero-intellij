@@ -1,160 +1,88 @@
 package io.jzero.language;
 
-import io.jzero.antlr4.ApiLexer;
-import io.jzero.antlr4.ApiParser;
-import io.jzero.highlighting.ApiSyntaxHighlighter;
-import io.jzero.parser.ApiParserDefinition;
-import io.jzero.psi.ApiFile;
-import io.jzero.psi.IdentifierPSINode;
-import io.jzero.psi.nodes.*;
 import com.intellij.lang.ASTNode;
 import com.intellij.lang.annotation.AnnotationHolder;
 import com.intellij.lang.annotation.Annotator;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiReference;
-import com.intellij.psi.impl.source.tree.LeafPsiElement;
-import com.intellij.psi.tree.IElementType;
-import org.antlr.jetbrains.adapter.psi.ScopeNode;
+import com.intellij.psi.PsiFile;
+import io.jzero.antlr4.ApiParser;
+import io.jzero.parser.ApiParserDefinition;
+import io.jzero.psi.ApiFile;
+import io.jzero.psi.ApiFileCache;
+import io.jzero.psi.nodes.ApiRootNode;
+import io.jzero.psi.nodes.ServiceNode;
+import com.intellij.psi.util.PsiTreeUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
+/**
+ * Lightweight annotator: duplicate handler/route/struct only.
+ * No resolve(), no per-field walks — those block the EDT on large .api files.
+ */
 public class ApiAnnotator implements Annotator {
-
-    private AnnotationHolder mHolder;
-    private Map<IElementType, List<ASTNode>> allNode;
 
     @Override
     public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
-        mHolder = holder;
-
-        // For all elements that could be type references, use navigation logic
-        PsiReference ref = element.getReference();
-        if (ref != null) {
-            PsiElement resolved = ref.resolve();
-            // If navigation works (resolved != null), apply highlighting for custom types
-            if (resolved != null) {
-                // Check if this is a custom struct type (not basic types)
-                String elementText = element.getText();
-                if (elementText != null && !isBasicType(elementText) && !elementText.contains(".")) {
-                    holder.createInfoAnnotation(element, elementText).setTextAttributes(ApiSyntaxHighlighter.IDENTIFIER);
-                }
-            } else {
-                // If navigation fails, then show error
-                if (element.getText() != null && !element.getText().isEmpty() && !isBasicType(element.getText())) {
-                    holder.createErrorAnnotation(element, "can not resolve " + element.getText());
-                }
-            }
+        if (DumbService.isDumb(element.getProject())) {
             return;
         }
-
-        if (!(element instanceof IPsiNode)) {
+        if (!(element instanceof ApiRootNode)) {
             return;
         }
-        if (element instanceof ApiRootNode) {
-            ApiRootNode root = (ApiRootNode) element;
-            allNode = root.getAllNode();
-            Map<IElementType, Set<ASTNode>> duplicateNode = ApiRootNode.getAllDuplicateNode(allNode);
-            duplicateNode.forEach((et, nodes) -> {
-                if (nodes.size() > 1) {
-                    if (et.equals(ApiParserDefinition.rule(ApiParser.RULE_structNameId))) {
-                        for (ASTNode node : nodes) {
-                            mHolder.createErrorAnnotation(node, "duplicate struct " + node.getText());
-                        }
-                    } else if (et.equals(ApiParserDefinition.rule(ApiParser.RULE_handlerValue))) {
-                        for (ASTNode node : nodes) {
-                            mHolder.createErrorAnnotation(node, "duplicate handler " + node.getText());
-                        }
-                    } else {// route
-                        for (ASTNode node : nodes) {
-                            mHolder.createErrorAnnotation(node, "duplicate route " + node.getText());
-                        }
-                    }
+        PsiFile file = element.getContainingFile();
+        if (file == null) {
+            return;
+        }
+        ApiFileCache cache = ApiFileCache.of(file);
+        markDup((ApiRootNode) element, holder, cache, ApiParser.RULE_handlerValue,
+                "duplicate handler ", cache::isDupHandler);
+        markRouteDupsInServices((ApiRootNode) element, holder);
+        markDup((ApiRootNode) element, holder, cache, ApiParser.RULE_structNameId,
+                "duplicate struct ", cache::isDupStruct);
+    }
+
+    /** Routes are unique per service block; same path under different @server prefix is OK. */
+    private static void markRouteDupsInServices(@NotNull ApiRootNode root,
+                                                @NotNull AnnotationHolder holder) {
+        for (ServiceNode service : PsiTreeUtil.findChildrenOfType(root, ServiceNode.class)) {
+            List<ASTNode> routes = ApiFile.findChildren(
+                    service, ApiParserDefinition.rule(ApiParser.RULE_httpRoute));
+            if (routes == null || routes.isEmpty()) {
+                continue;
+            }
+            java.util.Map<String, java.util.List<ASTNode>> grouped = new java.util.HashMap<>();
+            for (ASTNode route : routes) {
+                String key = route.getText();
+                grouped.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(route);
+            }
+            for (java.util.List<ASTNode> same : grouped.values()) {
+                if (same.size() <= 1) {
+                    continue;
                 }
-            });
-
-        } else if (element instanceof StructNode) {
-            StructNode node = (StructNode) element;
-            Map<String, Set<PsiElement>> duplicateField = node.getDuplicateField();
-            duplicateField.forEach((s, psiElements) -> {
-                if (psiElements == null || s == null) return;
-                psiElements.forEach(el -> {
-                    if (el == null) return;
-                    mHolder.createErrorAnnotation(el, "filed [" + s + "] redeclare in this struct");
-                });
-            });
-        } else if (element instanceof ServiceNameNode) {
-            mHolder.createInfoAnnotation(element, element.getText()).setTextAttributes(ApiSyntaxHighlighter.IDENTIFIER);
-        } else if (element instanceof ReferenceIdNode) {//RULE_referenceId
-            if (element.getText().contains(".")) {
-                return;
-            }
-
-            // ReferenceIdNode should be handled by the general logic above
-            // No need for special handling here
-        } else if (element instanceof BodyNode) {//RULE_body
-            if (element.getText().contains(".")) {
-                return;
-            }
-
-            PsiElement lastChild = element.getLastChild();
-            if (lastChild == null) {
-                return;
-            }
-
-            if (lastChild instanceof LeafPsiElement) {
-                LeafPsiElement leafPsiElement = (LeafPsiElement) lastChild;
-                if (leafPsiElement.getElementType().equals(ApiParserDefinition.GOTYPE)) {
-                    return;
-                }
-            }
-
-            // BodyNode should be handled by the general logic above
-            // No need for special handling here
-
-            // Also handle the lastChild for BodyNode specifically
-            PsiElement bodyLastChild = element.getLastChild();
-            if (bodyLastChild != null) {
-                PsiReference childRef = bodyLastChild.getReference();
-                if (childRef != null && childRef.resolve() == null && bodyLastChild.getText() != null && !bodyLastChild.getText().isEmpty()) {
-                    holder.createErrorAnnotation(element, "can not resolve " + bodyLastChild.getText());
-                }
-            }
-        } else if (element instanceof AnonymousField) {
-            // AnonymousField should be handled by the general logic above
-            // But also check the nameNode specifically
-            PsiElement nameNode = ((AnonymousField) element).getNameNode();
-            if (nameNode != null) {
-                PsiReference nameRef = nameNode.getReference();
-                if (nameRef != null && nameRef.resolve() == null && nameNode.getText() != null && !nameNode.getText().isEmpty()) {
-                    holder.createErrorAnnotation(element, "can not resolve " + nameNode.getText());
+                for (ASTNode node : same) {
+                    holder.createErrorAnnotation(node, "duplicate route " + node.getText());
                 }
             }
         }
     }
 
-    /**
-     * Check if a type is a basic built-in type that shouldn't be highlighted as a custom struct
-     */
-    private boolean isBasicType(String typeName) {
-        return typeName.equals("string") ||
-               typeName.equals("int") ||
-               typeName.equals("int64") ||
-               typeName.equals("int32") ||
-               typeName.equals("bool") ||
-               typeName.equals("boolean") ||
-               typeName.equals("float") ||
-               typeName.equals("float64") ||
-               typeName.equals("double") ||
-               typeName.equals("any") ||
-               typeName.equals("interface{}") ||
-               typeName.startsWith("[]") && isBasicType(typeName.substring(2).trim()) ||
-               typeName.startsWith("map[") ||
-               typeName.equals("time.Time") ||
-               typeName.equals("[]time.Time");
+    private static void markDup(@NotNull ApiRootNode root,
+                                @NotNull AnnotationHolder holder,
+                                @NotNull ApiFileCache cache,
+                                int rule,
+                                @NotNull String prefix,
+                                @NotNull java.util.function.Predicate<String> isDup) {
+        List<ASTNode> nodes = ApiFile.findChildren(root, ApiParserDefinition.rule(rule));
+        if (nodes == null) {
+            return;
+        }
+        for (ASTNode node : nodes) {
+            String name = node.getText();
+            if (isDup.test(name)) {
+                holder.createErrorAnnotation(node, prefix + name);
+            }
+        }
     }
-
-
 }

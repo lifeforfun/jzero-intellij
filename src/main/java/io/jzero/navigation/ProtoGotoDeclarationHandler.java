@@ -39,11 +39,6 @@ public class ProtoGotoDeclarationHandler implements LineMarkerProvider {
             return null;
         }
 
-        // Check if the logic file exists before showing the marker
-        if (!logicFileExists(element, rpcInfo)) {
-            return null;
-        }
-
         return createNavigationMarkerForRpc(element, rpcInfo);
     }
 

@@ -62,6 +62,9 @@ public class ApiSyntaxHighlighter extends SyntaxHighlighterBase {
                 case ApiLexer.MAP:
                 case ApiLexer.STRUCT:
                 case ApiLexer.TYPE:
+                case ApiLexer.VO:
+                case ApiLexer.DTO:
+                case ApiLexer.ANY:
                 case ApiLexer.ATSERVER:
                 case ApiLexer.ATHANDLER:
                 case ApiLexer.ATDOC:

@@ -106,7 +106,7 @@ public class JzeroConfigReader {
             }
         }
 
-        return "gozero"; // Default style
+        return "go_zero"; // fanqie / 二开 goctl 默认 snake_case 文件名
     }
 
     /**
@@ -173,13 +173,9 @@ public class JzeroConfigReader {
             Object topLevelStyle = configMap.get("style");
             if (topLevelStyle instanceof String) {
                 config.setStyle((String) topLevelStyle);
-                System.out.println("DEBUG: Top-level style found: " + topLevelStyle);
             }
 
-            // 获取 gen 配置
             Object genConfig = configMap.get("gen");
-            System.out.println("DEBUG: genConfig type: " + (genConfig != null ? genConfig.getClass().getSimpleName() : "null"));
-            System.out.println("DEBUG: genConfig value: " + genConfig);
 
             if (genConfig instanceof Map) {
                 // 安全的类型转换
@@ -187,8 +183,7 @@ public class JzeroConfigReader {
                 try {
                     genMap = (Map<String, Object>) genConfig;
                 } catch (ClassCastException e) {
-                    System.out.println("DEBUG: Failed to cast genConfig to Map");
-                    return config; // Return config with only top-level style if available
+                    return config;
                 }
 
                 // 获取 gen.style 配置

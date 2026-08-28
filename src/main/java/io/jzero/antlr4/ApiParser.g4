@@ -4,6 +4,35 @@ options {
     tokenVocab = ApiLexer;
 }
 
+@parser::members {
+boolean isNormalField() {
+    int line = _input.LT(1).getLine();
+    java.util.List<Integer> types = new java.util.ArrayList<>();
+    int idx = 1;
+    while (true) {
+        org.antlr.v4.runtime.Token t = _input.LT(idx);
+        if (t.getType() == org.antlr.v4.runtime.Token.EOF) {
+            break;
+        }
+        if (t.getLine() != line) {
+            break;
+        }
+        types.add(t.getType());
+        idx++;
+    }
+    if (types.isEmpty()) {
+        return false;
+    }
+    if (types.size() == 1) {
+        return false;
+    }
+    if (types.get(0) == ApiLexer.STAR) {
+        return false;
+    }
+    return true;
+}
+}
+
 api:
     syntaxLit?
     (
@@ -27,41 +56,46 @@ importGroup: IMPORT LPAREN importValue* RPAREN;
 // info
 infoStatement: INFO LPAREN pair RPAREN;
 
-// types
-typeStatement: (typeSingleSpec|typeGroupSpec);
+// types: type / vo / dto
+typeStatement: typeSingleSpec|typeGroupSpec;
 
-// eg: type (...)
-typeGroupSpec:TYPE LPAREN typeGroupBody RPAREN;
+typeGroupSpec: groupName LPAREN typeGroupBody RPAREN;
+groupName: TYPE | VO | DTO;
 typeGroupBody:(typeGroupAlias|structType)*;
-typeGroupAlias:structNameId normalFieldType;
 
-// eg: type xx struct {...}
-typeSingleSpec: typeAlias|typeStruct;
+typeSingleSpec: typeAlias|typeStruct|voSingle|dtoSingle;
 typeStruct:TYPE structType;
-// eg: type Integer int
 typeAlias:TYPE structNameId '='? normalFieldType;
-typeFiled:anonymousField|normalField |structType;
-normalField:fieldName fieldType  tag?;
+voSingle: VO structType;
+dtoSingle: DTO (structType | structNameId '='? normalFieldType);
+
+typeGroupAlias:structNameId '='? normalFieldType;
+
+typeFiled:
+    ({isNormalField()}? normalField)
+    | anonymousField
+    | structType;
+normalField:fieldName (COMMA fieldName)* fieldType tag?;
 fieldType:normalFieldType|starFieldType|mapFieldType|arrayOrSliceType;
-anonymousField: STAR? referenceId;
-normalFieldType: GOTYPE|referenceId|(INTERFACE LBRACE RBRACE);
+anonymousField: STAR? referenceId tag?;
+normalFieldType: GOTYPE|referenceId|ANY|(INTERFACE LBRACE RBRACE);
 starFieldType: STAR normalFieldType;
 mapFieldType: MAP LBRACK fieldType RBRACK fieldType;
-arrayOrSliceType: (LBRACK NUMBER? RBRACK)+ fieldType;
-structType: structNameId STRUCT? LBRACE (typeFiled)* RBRACE tag?;
+arrayOrSliceType: (LBRACK (NUMBER|IDENT)? RBRACK)+ fieldType;
+structType: structNameId STRUCT? LBRACE (typeFiled)* RBRACE;
 structNameId:IDENT;
 fieldName:IDENT;
 referenceId:pkg? IDENT;
 pkg: IDENT DOT;
 tag: RAW_STRING;
-body: (LBRACK RBRACK)? STAR? (IDENT|GOTYPE);
+body: (LBRACK RBRACK)? STAR? (IDENT|GOTYPE|ANY);
+
 // service
 serviceStatement: (serviceServerSpec? serviceSpec);
 serviceServerSpec: ATSERVER LPAREN identPair RPAREN;
 
-
 serviceSpec: SERVICE serviceName LBRACE serviceBody+ RBRACE;
-serviceName:IDENT;
+serviceName:(IDENT BAR?)+;
 serviceBody:(serviceDoc|serviceDocNew)? (serviceHandler|serviceHandlerNew) serviceRoute;
 serviceDoc: ATDOC LPAREN pair RPAREN;
 serviceDocNew: ATDOC (docValue|(LPAREN docValue RPAREN));
@@ -69,9 +103,9 @@ serviceHandler: ATSERVER LPAREN handlerPair RPAREN;
 serviceHandlerNew: ATHANDLER handlerValue;
 serviceRoute:httpRoute (LPAREN body? RPAREN)? (RETURNS LPAREN body? RPAREN)? SMICOLON?;
 httpRoute:HTTPMETHOD PATH;
-identPair:(key COLON (DURATION|identValue|PATH|NUMBER|RAW_STRING|VALUE))*;
+identPair:(key COLON (DURATION|identValue|PATH|NUMBER|RAW_STRING|VALUE|IDENT))*;
 handlerPair:(key COLON handlerValue)+;
-identValue:(IDENT ','?)+;
+identValue:(IDENT COMMA?)+;
 handlerValue:VALUE|RAW_STRING|IDENT;
 importValue:VALUE (AS IDENT)?;
 docValue:VALUE;

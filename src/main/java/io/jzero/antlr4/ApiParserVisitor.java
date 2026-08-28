@@ -1,4 +1,4 @@
-// Generated from /Users/keson/webspace/goctl-intellij/src/main/java/cn/xiaoheiban/antlr4/ApiParser.g4 by ANTLR 4.13.2
+// Generated from ApiParser.g4 by ANTLR 4.10.1
 package io.jzero.antlr4;
 import org.antlr.v4.runtime.tree.ParseTreeVisitor;
 
@@ -71,17 +71,17 @@ public interface ApiParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitTypeGroupSpec(ApiParser.TypeGroupSpecContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link ApiParser#groupName}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitGroupName(ApiParser.GroupNameContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link ApiParser#typeGroupBody}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
 	T visitTypeGroupBody(ApiParser.TypeGroupBodyContext ctx);
-	/**
-	 * Visit a parse tree produced by {@link ApiParser#typeGroupAlias}.
-	 * @param ctx the parse tree
-	 * @return the visitor result
-	 */
-	T visitTypeGroupAlias(ApiParser.TypeGroupAliasContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link ApiParser#typeSingleSpec}.
 	 * @param ctx the parse tree
@@ -100,6 +100,24 @@ public interface ApiParserVisitor<T> extends ParseTreeVisitor<T> {
 	 * @return the visitor result
 	 */
 	T visitTypeAlias(ApiParser.TypeAliasContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link ApiParser#voSingle}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitVoSingle(ApiParser.VoSingleContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link ApiParser#dtoSingle}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitDtoSingle(ApiParser.DtoSingleContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link ApiParser#typeGroupAlias}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitTypeGroupAlias(ApiParser.TypeGroupAliasContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link ApiParser#typeFiled}.
 	 * @param ctx the parse tree
