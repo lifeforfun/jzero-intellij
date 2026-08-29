@@ -10,7 +10,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Ctrl/⌘+Click on @handler name — resolve only on explicit navigation, not during highlighting.
+ * Ctrl/⌘+Click: @handler Xxx → logic/handler go file;
+ * {@code middleware: Xxx} → middleware/xxx.go.
  */
 public class ApiHandlerGotoDeclarationHandler implements GotoDeclarationHandler {
 
@@ -19,24 +20,26 @@ public class ApiHandlerGotoDeclarationHandler implements GotoDeclarationHandler 
     public PsiElement[] getGotoDeclarationTargets(@Nullable PsiElement source,
                                                   int offset,
                                                   @NotNull Editor editor) {
-        if (source == null) {
+        if (source == null || source.getNode() == null
+                || source.getNode().getElementType() != ApiParserDefinition.IDENTIFIER) {
             return PsiElement.EMPTY_ARRAY;
         }
-        if (source.getNode() == null
-                || source.getNode().getElementType() != ApiParserDefinition.IDENTIFIER
-                || !(source.getParent() instanceof HandlerValueNode)) {
+        String name = source.getText();
+        if (name == null || name.trim().isEmpty()) {
             return PsiElement.EMPTY_ARRAY;
         }
-        String handlerName = source.getText();
-        if (handlerName == null || handlerName.trim().isEmpty()) {
+
+        PsiFile target = null;
+        if (source.getParent() instanceof HandlerValueNode) {
+            target = HandlerLogicResolver.findLogicFile(source, name);
+        } else if (HandlerLogicResolver.isMiddlewareValue(source)) {
+            target = HandlerLogicResolver.findMiddlewareFile(source, name);
+        }
+        if (target == null) {
             return PsiElement.EMPTY_ARRAY;
         }
-        PsiFile logic = HandlerLogicResolver.findLogicFile(source, handlerName);
-        if (logic == null) {
-            return PsiElement.EMPTY_ARRAY;
-        }
-        int targetOffset = HandlerLogicResolver.findLogicTargetOffset(logic, handlerName);
-        PsiElement at = logic.findElementAt(targetOffset);
-        return at != null ? new PsiElement[]{at} : new PsiElement[]{logic};
+        int targetOffset = HandlerLogicResolver.findLogicTargetOffset(target, name);
+        PsiElement at = target.findElementAt(targetOffset);
+        return at != null ? new PsiElement[]{at} : new PsiElement[]{target};
     }
 }
