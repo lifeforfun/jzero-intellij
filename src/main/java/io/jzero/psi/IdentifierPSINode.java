@@ -29,7 +29,7 @@ public class IdentifierPSINode extends AntlrPsiLeafNode implements PsiNamedEleme
 
     @Override
     public PsiElement setName(@NonNls @NotNull String name) throws IncorrectOperationException {
-        if (getParent() == null) return this; // weird but it happened once
+        if (getParent() == null) return this;
         PsiElement newID = Trees.createLeafFromText(getProject(),
                 ApiLanguage.INSTANCE,
                 getContext(),
@@ -41,19 +41,9 @@ public class IdentifierPSINode extends AntlrPsiLeafNode implements PsiNamedEleme
         return this;
     }
 
+    /** No PsiReference — highlighting must not resolve; use GotoDeclarationHandler. */
     @Override
     public PsiReference getReference() {
-        PsiElement parent = getParent();
-        IElementType elType = parent.getNode().getElementType();
-        if (elType instanceof RuleIElementType) {
-            switch (((RuleIElementType) elType).getRuleIndex()) {
-                case ApiParser.RULE_handlerValue:
-                    return new HandlerReference(this);
-                case ApiParser.RULE_referenceId:
-                case ApiParser.RULE_body:
-                    return new StructReference(this);
-            }
-        }
         return null;
     }
 }

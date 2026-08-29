@@ -32,9 +32,6 @@
          on how to target different products -->
     <depends>com.intellij.modules.lang</depends>
 
-    <application-components>
-    </application-components>
-
     <extensions defaultExtensionNs="com.intellij">
         <internalFileTemplate name="Api File"/>
         <internalFileTemplate name="Api Template"/>
@@ -43,11 +40,19 @@
                                        implementationClass="io.jzero.highlighting.ApiSyntaxHighlighterFactory"/>
         <lang.parserDefinition language="api" implementationClass="io.jzero.parser.ApiParserDefinition"/>
         <lang.ast.factory language="api" implementationClass="io.jzero.psi.ApiASTFactory"/>
-        <annotator language="api" implementationClass="io.jzero.language.ApiAnnotator"/>
+        <localInspection language="api"
+                         shortName="ApiDuplicate"
+                         displayName="Duplicate API definitions"
+                         groupName="Jzero"
+                         enabledByDefault="true"
+                         level="WARNING"
+                         implementationClass="io.jzero.inspection.ApiDuplicateInspection"/>
         <colorSettingsPage implementation="io.jzero.highlighting.ApiColorSettingsPage"/>
         <lang.braceMatcher language="api" implementationClass="io.jzero.editor.ApiPairedBraceMatcher"/>
 
         <lang.formatter language="api" implementationClass="io.jzero.formatter.ApiFormatter"/>
+        <langCodeStyleSettingsProvider implementation="io.jzero.editor.ApiCodeStyleSettingsProvider"/>
+        <postStartupActivity implementation="io.jzero.ApiPerfStartup"/>
         <lang.quoteHandler language="api" implementationClass="io.jzero.editor.QuoteHandler"/>
         <lang.commenter language="api" implementationClass="io.jzero.language.ApiCommenter"/>
         <completion.contributor language="api"
@@ -61,8 +66,9 @@
         <liveTemplateContext implementation="io.jzero.template.ApiLiveTemplateContextType$Tag"/>
         <liveTemplateContext implementation="io.jzero.template.ApiLiveTemplateContextType$TagLiteral"/>
         <liveTemplateMacro implementation="io.jzero.template.ApiFieldNameMacro"/>
-        <codeInsight.lineMarkerProvider language="api" implementationClass="io.jzero.navigation.TypeGotoDeclarationHandler"/>
-        <codeInsight.lineMarkerProvider language="api" implementationClass="io.jzero.navigation.ApiGotoDeclarationHandler"/>
+        <codeInsight.lineMarkerProvider language="api" implementationClass="io.jzero.navigation.ApiSlowLineMarkers"/>
+        <gotoDeclarationHandler implementation="io.jzero.navigation.ApiHandlerGotoDeclarationHandler"/>
+        <gotoDeclarationHandler implementation="io.jzero.navigation.ApiStructGotoDeclarationHandler"/>
         <codeInsight.lineMarkerProvider implementationClass="io.jzero.navigation.ProtoGotoDeclarationHandler"/>
         <codeInsight.lineMarkerProvider implementationClass="io.jzero.navigation.LogicGotoDeclarationHandler"/>
         <codeInsight.lineMarkerProvider implementationClass="io.jzero.navigation.JzeroGenLineMarkerProvider"/>
@@ -71,7 +77,13 @@
         <!-- Jzero Tool Window -->
         <toolWindow id="Jzero" factoryClass="io.jzero.ui.JzeroToolWindowFactory" anchor="left"
                     icon="/icons/jzero.svg"/>
+        <projectService serviceImplementation="io.jzero.index.ApiWorkQueue"/>
     </extensions>
+
+    <projectListeners>
+        <listener class="io.jzero.index.ApiPsiChangeListener"
+                  topic="com.intellij.psi.PsiTreeChangeListener"/>
+    </projectListeners>
 
     <actions>
         <action id="Api.NewSqlFile" class="io.jzero.action.SqlCreateFileAction"

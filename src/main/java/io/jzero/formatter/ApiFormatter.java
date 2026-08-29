@@ -150,10 +150,7 @@ public class ApiFormatter implements FormattingModelBuilder {
 
         @Override
         public @NotNull List<Block> getSubBlocks() {
-            if (mySubBlocks == null) {
-                mySubBlocks = buildSubBlocks();
-            }
-            return new ArrayList<>(mySubBlocks);
+            return Collections.emptyList();
         }
 
         @NotNull
@@ -372,7 +369,7 @@ public class ApiFormatter implements FormattingModelBuilder {
 
         @Override
         public boolean isLeaf() {
-            return myNode.getFirstChildNode() == null;
+            return true;
         }
 
         private static Spacing none() {

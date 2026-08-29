@@ -14,7 +14,7 @@ public final class TypesGoLocator {
     private TypesGoLocator() {
     }
 
-    static boolean exists(@NotNull PsiElement element) {
+    public static boolean exists(@NotNull PsiElement element) {
         return locate(element) != null;
     }
 

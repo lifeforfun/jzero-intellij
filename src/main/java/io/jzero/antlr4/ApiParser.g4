@@ -6,30 +6,15 @@ options {
 
 @parser::members {
 boolean isNormalField() {
-    int line = _input.LT(1).getLine();
-    java.util.List<Integer> types = new java.util.ArrayList<>();
-    int idx = 1;
-    while (true) {
-        org.antlr.v4.runtime.Token t = _input.LT(idx);
-        if (t.getType() == org.antlr.v4.runtime.Token.EOF) {
-            break;
-        }
-        if (t.getLine() != line) {
-            break;
-        }
-        types.add(t.getType());
-        idx++;
-    }
-    if (types.isEmpty()) {
+    org.antlr.v4.runtime.Token t1 = _input.LT(1);
+    org.antlr.v4.runtime.Token t2 = _input.LT(2);
+    if (t2.getType() == org.antlr.v4.runtime.Token.EOF) {
         return false;
     }
-    if (types.size() == 1) {
+    if (t2.getLine() != t1.getLine()) {
         return false;
     }
-    if (types.get(0) == ApiLexer.STAR) {
-        return false;
-    }
-    return true;
+    return t1.getType() != ApiLexer.STAR;
 }
 }
 

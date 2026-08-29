@@ -1,34 +1,37 @@
 package io.jzero.completion;
 
-import io.jzero.parser.ApiParserDefinition;
 import com.intellij.codeInsight.completion.CompletionContributor;
 import com.intellij.codeInsight.completion.CompletionType;
-import com.intellij.codeInsight.lookup.AutoCompletionPolicy;
-import com.intellij.openapi.project.DumbAware;
 import com.intellij.patterns.ElementPattern;
 import com.intellij.psi.PsiElement;
+import io.jzero.antlr4.ApiParser;
+import io.jzero.parser.ApiParserDefinition;
 
+import static com.intellij.patterns.PlatformPatterns.not;
+import static com.intellij.patterns.PlatformPatterns.or;
 import static com.intellij.patterns.PlatformPatterns.psiElement;
 
+/** Keywords — skip type-ref contexts handled by {@link ApiCompletionContributor}. */
+public class KeywordCompletionContributor extends CompletionContributor {
 
-public class KeywordCompletionContributor extends CompletionContributor implements DumbAware {
-    private static final String[] keywords = new String[]{"syntax", "import", "map", "type", "bool", "uint8", "uint16",
-            "uint32", "uint64", "int8", "int16", "int32", "int64", "float32", "float64", "complex64", "complex128",
-            "string", "int", "uint", "uintptr", "byte", "rune", "get", "head", "post", "put", "patch", "delete",
-            "connect", "options", "trace", "desc", "author", "email", "version", "title", "desc", "group", "jwt", "doc",
-            "server", "service", "info", "handler", "middleware", "jwtTransition", "prefix", "any", "timeout", "maxBytes",
-            "true", "false", "termsOfService", "contactName", "contactURL", "contactEmail", "licenseName", "licenseURL",
-            "consumes", "produces", "schemes", "host", "basePath", "tags", "externalDocs", "description", "wrapCodeMsg",
-            "bizCodeEnumDescription", "securityDefinitionsFromJson", "useDefinitions", "authType"};
+    private static final String[] KEYWORDS = {
+            "syntax", "import", "map", "type", "vo", "dto", "bool", "uint8", "uint16",
+            "uint32", "uint64", "int8", "int16", "int32", "int64", "float32", "float64",
+            "complex64", "complex128", "string", "int", "uint", "uintptr", "byte", "rune",
+            "get", "head", "post", "put", "patch", "delete", "connect", "options", "trace",
+            "info", "server", "service", "handler", "middleware", "returns", "interface{}",
+            "prefix", "group", "jwt", "doc", "any", "timeout", "maxBytes", "true", "false"
+    };
 
     public KeywordCompletionContributor() {
-        for (String keyword : keywords) {
-            extend(CompletionType.BASIC, typeDeclaration(), new ApiKeywordCompletionProvider(Priority.KEYWORD_PRIORITY, AutoCompletionPolicy.ALWAYS_AUTOCOMPLETE, keyword));
-        }
+        extend(CompletionType.BASIC, keywordContext(),
+                new ApiKeywordCompletionProvider(Priority.KEYWORD_PRIORITY, KEYWORDS));
     }
 
-    private static ElementPattern<? extends PsiElement> typeDeclaration() {
-        return psiElement(ApiParserDefinition.IDENTIFIER);
+    private static ElementPattern<PsiElement> keywordContext() {
+        return psiElement(ApiParserDefinition.IDENTIFIER).withParent(not(or(
+                psiElement(ApiParserDefinition.rule(ApiParser.RULE_referenceId)),
+                psiElement(ApiParserDefinition.rule(ApiParser.RULE_body))
+        )));
     }
-
 }

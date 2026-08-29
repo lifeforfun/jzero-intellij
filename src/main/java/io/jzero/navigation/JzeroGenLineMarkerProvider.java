@@ -1,6 +1,5 @@
 package io.jzero.navigation;
 
-import com.intellij.codeInsight.daemon.GutterIconNavigationHandler;
 import com.intellij.codeInsight.daemon.LineMarkerInfo;
 import com.intellij.codeInsight.daemon.LineMarkerProvider;
 import com.intellij.execution.ExecutionException;
@@ -12,29 +11,36 @@ import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.editor.markup.GutterIconRenderer;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiWhiteSpace;
-import io.jzero.psi.ApiFileCache;
 import io.jzero.runconfig.JzeroGenConfigurationFactory;
 import io.jzero.runconfig.JzeroGenConfigurationType;
 import io.jzero.runconfig.JzeroGenRunConfiguration;
+import io.jzero.util.ApiPerf;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.awt.event.MouseEvent;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * Gutter run buttons. Must stay O(1) per PSI element — never walk the file tree here.
- */
 public class JzeroGenLineMarkerProvider implements LineMarkerProvider {
+
+    private static final Key<Long> FIRST_OFF = Key.create("jzero.gen.firstOff");
+    private static final Key<Long> FIRST_STAMP = Key.create("jzero.gen.firstStamp");
+    private static final AtomicInteger SAMPLES = new AtomicInteger();
 
     @Nullable
     @Override
     public LineMarkerInfo<?> getLineMarkerInfo(@NotNull PsiElement element) {
+        int n = SAMPLES.incrementAndGet();
+        if (n % 1000 == 0) {
+            ApiPerf.inc("lineMarker.jzeroGen.calls");
+        }
         PsiFile containingFile = element.getContainingFile();
         if (containingFile == null) {
             return null;
@@ -44,8 +50,15 @@ public class JzeroGenLineMarkerProvider implements LineMarkerProvider {
             return null;
         }
 
-        Project project = containingFile.getProject();
         String fileName = virtualFile.getName();
+        if (!".jzero.yaml".equals(fileName)
+                && !fileName.endsWith(".api")
+                && !fileName.endsWith(".proto")
+                && !fileName.endsWith(".sql")) {
+            return null;
+        }
+
+        Project project = containingFile.getProject();
         String filePath = virtualFile.getPath();
 
         if (".jzero.yaml".equals(fileName)) {
@@ -53,28 +66,20 @@ public class JzeroGenLineMarkerProvider implements LineMarkerProvider {
         }
 
         if (fileName.endsWith(".api")) {
-            if (!filePath.contains("/desc/")) {
-                return null;
-            }
-            if (element.getTextRange().getStartOffset() != ApiFileCache.firstContentOffset(containingFile)) {
+            if (!filePath.contains("/desc/") || !atFirstContent(element, containingFile)) {
                 return null;
             }
             return createDescGenMarker(element, project);
         }
 
         if (fileName.endsWith(".proto")) {
-            if (filePath.contains("/desc/proto/") && !filePath.contains("/desc/proto/third_party/")) {
-                if (element.getTextRange().getStartOffset() != ApiFileCache.firstContentOffset(containingFile)) {
-                    return null;
-                }
+            if (filePath.contains("/desc/proto/") && !filePath.contains("/desc/proto/third_party/")
+                    && atFirstContent(element, containingFile)) {
                 return createDescGenMarker(element, project);
             }
         }
 
-        if (fileName.endsWith(".sql") && filePath.contains("/desc/sql/")) {
-            if (element.getTextRange().getStartOffset() != ApiFileCache.firstContentOffset(containingFile)) {
-                return null;
-            }
+        if (fileName.endsWith(".sql") && filePath.contains("/desc/sql/") && atFirstContent(element, containingFile)) {
             return createDescGenMarker(element, project);
         }
 
@@ -215,6 +220,39 @@ public class JzeroGenLineMarkerProvider implements LineMarkerProvider {
     @Override
     public void collectSlowLineMarkers(@NotNull List<? extends PsiElement> elements,
                                        @NotNull Collection<? super LineMarkerInfo<?>> result) {
-        // heavy checks belong here, not in getLineMarkerInfo
+    }
+
+    private static boolean atFirstContent(@NotNull PsiElement element, @NotNull PsiFile file) {
+        int off = firstContentOffset(file);
+        if (element.getTextRange().getStartOffset() != off) {
+            return false;
+        }
+        PsiElement leaf = file.findElementAt(off);
+        return leaf != null && leaf.getTextRange().getStartOffset() == element.getTextRange().getStartOffset()
+                && leaf.getTextLength() == element.getTextLength();
+    }
+
+    private static int firstContentOffset(@NotNull PsiFile file) {
+        long stamp = file.getModificationStamp();
+        Long cached = file.getUserData(FIRST_OFF);
+        Long cachedStamp = file.getUserData(FIRST_STAMP);
+        if (cached != null && cachedStamp != null && cachedStamp == stamp) {
+            return cached.intValue();
+        }
+        int off = 0;
+        PsiElement cur = file.getFirstChild();
+        while (cur != null) {
+            if (!(cur instanceof PsiWhiteSpace)) {
+                String t = cur.getText();
+                if (t != null && !t.trim().isEmpty()) {
+                    off = cur.getTextRange().getStartOffset();
+                    break;
+                }
+            }
+            cur = cur.getNextSibling();
+        }
+        file.putUserData(FIRST_OFF, (long) off);
+        file.putUserData(FIRST_STAMP, stamp);
+        return off;
     }
 }

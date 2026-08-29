@@ -22,6 +22,7 @@ import org.antlr.jetbrains.adapter.lexer.RuleIElementType;
 import org.antlr.jetbrains.adapter.lexer.TokenIElementType;
 import org.antlr.jetbrains.adapter.parser.AntlrParserAdapter;
 import org.antlr.jetbrains.adapter.psi.AntlrPsiNode;
+import io.jzero.util.ApiPerf;
 import org.antlr.v4.runtime.Parser;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.jetbrains.annotations.NotNull;
@@ -110,6 +111,10 @@ public class ApiParserDefinition implements ParserDefinition {
 
             @Override
             protected ParseTree parse(Parser parser, IElementType root) {
+                return ApiPerf.call("parser.parse", () -> parse0(parser, root));
+            }
+
+            private ParseTree parse0(Parser parser, IElementType root) {
                 if (root instanceof IFileElementType) {
                     return ((ApiParser) parser).api();
                 }

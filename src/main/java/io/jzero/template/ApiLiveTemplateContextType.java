@@ -7,6 +7,7 @@ import io.jzero.highlighting.ApiSyntaxHighlighter;
 import io.jzero.language.ApiLanguage;
 import io.jzero.parser.ApiParserDefinition;
 import io.jzero.psi.ApiFile;
+import io.jzero.util.ApiPerf;
 import com.intellij.codeInsight.template.TemplateContextType;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.fileTypes.SyntaxHighlighter;
@@ -29,6 +30,10 @@ abstract public class ApiLiveTemplateContextType extends TemplateContextType {
 
     @Override
     public boolean isInContext(@NotNull PsiFile file, int offset) {
+        return ApiPerf.call("liveTemplate." + getPresentableName(), () -> isInContext0(file, offset));
+    }
+
+    private boolean isInContext0(@NotNull PsiFile file, int offset) {
         if (PsiUtilCore.getLanguageAtOffset(file, offset).isKindOf(ApiLanguage.INSTANCE)) {
             PsiElement psiElement = ObjectUtils.notNull(file.findElementAt(offset), file);
             if (!acceptLeaf()) {
@@ -158,15 +163,11 @@ abstract public class ApiLiveTemplateContextType extends TemplateContextType {
 
         @Override
         protected boolean isInContext(@NotNull PsiElement element) {
-            if (element.getNode().getElementType() == ApiParserDefinition.IDENTIFIER) {
-                if (isInsideFieldTypeDeclaration(element)) {
-                    return true;
-                }
-                if (isInsideFieldTypeDeclaration(prevVisibleLeafOrNewLine(element))) {
-                    return true;
-                }
+            if (element.getNode() == null
+                    || element.getNode().getElementType() != ApiParserDefinition.IDENTIFIER) {
+                return false;
             }
-            return false;
+            return isInsideFieldTypeDeclaration(element);
         }
 
         private static boolean isInsideFieldTypeDeclaration(@Nullable PsiElement element) {

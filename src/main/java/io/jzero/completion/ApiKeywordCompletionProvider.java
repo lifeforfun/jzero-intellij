@@ -30,6 +30,11 @@ public class ApiKeywordCompletionProvider extends ApiProvider {
     @NotNull
     private final String[] myKeywords;
 
+    public ApiKeywordCompletionProvider(int priority, @NotNull String... keywords) {
+        super(priority, (InsertHandler<LookupElement>) null);
+        myKeywords = keywords;
+    }
+
     public ApiKeywordCompletionProvider(int priority, @Nullable InsertHandler<LookupElement> insertHandler, @NotNull String... keywords) {
         super(priority, insertHandler);
         myKeywords = keywords;
